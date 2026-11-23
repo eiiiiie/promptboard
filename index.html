@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#f3e9d5">
+<meta name="robots" content="noindex, nofollow">
 <title>프롬프트 보드</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23f3e9d5'/%3E%3Cpath d='M6 10h20M6 16h20M6 22h13' stroke='%23b23b2b' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
 <style>
@@ -411,6 +412,8 @@ function renderCards(){
   // 순서가 같으면 칸을 다시 만들지 않는다 (입력 중인 칸의 커서와 화면 위치가 그대로)
   const same = list.length === cardsEl.children.length && list.every((e, i) => cardsEl.children[i] === e);
   if(!same) cardsEl.replaceChildren(...list);
+  // 칸이 화면에 붙은 뒤에야 글 높이를 잴 수 있다 (붙기 전에 재면 0 이 나와 글이 가려진다)
+  for(const e of list) fit(e.querySelector(".text"));
   $("#empty").hidden = t.cards.length > 0;
   if(scrollY !== y) scrollTo(0, y);
 }
@@ -454,8 +457,6 @@ function updateCard(e, c, i){
   set(".title", c.title || "");
   set(".text", c.text || "");
   set(".paths", (c.paths || []).join("\n"));
-  const t = e.querySelector(".text");
-  if(!t.style.height) grow(t);
   const key = (c.images || []).join("|");
   if(e.dataset.imgs !== key){
     e.dataset.imgs = key;
@@ -476,6 +477,7 @@ function shown(c, key){
   return typeof c[key] === "boolean" ? c[key] : has;
 }
 // 글 길이에 맞게 칸 높이를 바꾼다. 잠깐 줄어드는 동안 화면이 위로 튀지 않게 위치를 되돌린다
+function fit(t){ if(t.isConnected && Math.abs(t.scrollHeight + 2 - t.offsetHeight) > 1) grow(t); }
 function grow(t){
   const y = scrollY;
   t.style.height = "auto";
@@ -936,6 +938,8 @@ $("#dlgClose").onclick = () => $("#dlg").close();
 $("#menuBtn").onclick = openDialog;
 $("#addTab").onclick = addTab;
 $("#addCard").onclick = () => addCard();
+let resizeTimer;
+addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => cardsEl.querySelectorAll(".text").forEach(grow), 150); });
 addEventListener("beforeunload", e => { if(outbox.length){ flush(); e.preventDefault(); } });
 document.addEventListener("visibilitychange", () => { if(!document.hidden && !IS_PC && outbox.length) flush(); });
 
