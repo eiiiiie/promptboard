@@ -8,7 +8,7 @@ self.addEventListener("fetch", e => {
     const c = await caches.open("pb-share");
     const id = Date.now() + "-" + Math.random().toString(36).slice(2, 8);
     const files = [];
-    for(const [i, f] of form.getAll("images").entries()){
+    for(const [i, f] of [...form.getAll("files"), ...form.getAll("images")].entries()){
       if(!f || !f.size) continue;
       const key = `share-file/${id}/${i}`;
       await c.put(key, new Response(f, {headers: {"Content-Type": f.type || "application/octet-stream", "X-Name": encodeURIComponent(f.name || "")}}));
