@@ -165,7 +165,7 @@ dialog::backdrop{background:rgba(40,30,10,.35)}
 <input type="file" id="filePick" accept="image/*" multiple hidden>
 <div id="toast"><span id="toastMsg"></span><button id="toastBtn" hidden></button></div>
 <div id="viewer"><img alt=""></div>
-<div id="drop">여기에 놓으면 이미지가 들어가요</div>
+<div id="drop">여기에 놓으면 새 칸에 들어가요</div>
 <div id="setup">
   <h1>프롬프트 보드</h1>
   <p>처음 한 번만 연결하면 돼요.</p>
@@ -383,6 +383,7 @@ async function poll(){
         render();
         if(firstLoad) tabsEl.querySelector(".tab.active")?.scrollIntoView({inline: "nearest", block: "nearest"});
         if(firstLoad && outbox.length) flush();
+        if(firstLoad && !IS_PC) takeShared();
       }
       if(!outbox.length) setStatus("저장됨");
     }catch(e){
@@ -423,7 +424,7 @@ function makeCard(c){
   const id = () => e.dataset.id;
   const title = el("input", {class: "title", placeholder: "제목", oninput: () => edit(id(), {title: title.value}, 600)});
   const text = el("textarea", {class: "text", placeholder: "프롬프트를 적으세요", oninput: () => { grow(text); edit(id(), {text: text.value}, 600); }});
-  const paths = el("textarea", {class: "paths", placeholder: "파일 경로 (한 줄에 하나)", oninput: () => edit(id(), {paths: paths.value.split("\n")}, 600)});
+  const paths = el("textarea", {class: "paths", placeholder: "파일·폴더 경로 (한 줄에 하나, 끌어다 놓아도 돼요)", oninput: () => edit(id(), {paths: paths.value.split("\n")}, 600)});
   paths.addEventListener("blur", () => edit(id(), {paths: paths.value.split("\n").map(s => s.trim()).filter(Boolean)}, 0));
   const tog = (label, key) => el("button", {class: "tog", "data-key": key, onclick: () => { const [, , c2] = findCard(id()); edit(id(), {[key]: !shown(c2, key)}, 0); renderCards(); }}, label);
   const copyBtn = el("button", {class: "copy", title: "글과 이미지를 모두 복사", onclick: () => copyCard(id(), copyBtn)}, "복사");
@@ -442,7 +443,7 @@ function makeCard(c){
   e.addEventListener("pointerdown", () => selCard = id());
   e.addEventListener("dragover", ev => { if(hasFiles(ev)){ ev.preventDefault(); ev.stopPropagation(); e.classList.add("dragover"); $("#drop").classList.remove("on"); } });
   e.addEventListener("dragleave", () => e.classList.remove("dragover"));
-  e.addEventListener("drop", ev => { e.classList.remove("dragover"); if(hasFiles(ev)){ ev.preventDefault(); ev.stopPropagation(); dropDepth = 0; $("#drop").classList.remove("on"); addImages(id(), ev.dataTransfer.files); } });
+  e.addEventListener("drop", ev => { e.classList.remove("dragover"); if(hasFiles(ev)){ ev.preventDefault(); ev.stopPropagation(); dropDepth = 0; $("#drop").classList.remove("on"); dropInto(id(), ev.dataTransfer); } });
   return e;
 }
 
@@ -468,7 +469,7 @@ function updateCard(e, c, i){
         IS_PC ? el("button", {class: "ib cp", title: "이 이미지만 복사", onclick: ev => copyImage(img.src, ev.currentTarget)}, "복사") : null,
         el("button", {class: "ib del", title: "이미지 빼기", onclick: () => removeImage(e.dataset.id, im)}, "×"));
     }),
-    el("span", {class: "hint pc-only"}, "이미지를 여기에 끌어다 놓거나, 이 칸을 누른 뒤 Ctrl+V"),
+    el("span", {class: "hint pc-only"}, "이미지·파일·폴더를 여기에 끌어다 놓거나, 이 칸을 누른 뒤 Ctrl+V"),
     el("button", {onclick: () => pickImages(e.dataset.id)}, IS_PC ? "파일에서 넣기" : "+ 사진 넣기"));
   }
 }
@@ -541,10 +542,10 @@ async function copyCard(id, btn){
   if(!text.trim() && !n) return toast("복사할 내용이 없어요");
   try{
     if(IS_PC){
-      const r = await local.req("/api/copy", {text, images: c.images});
+      const r = await local.req("/api/copy", {text, images: c.images, paths: c.paths});
       flash(btn);
-      toast(r.combo ? `글과 이미지 ${n}장을 복사했어요. 붙여넣을 곳에서 Ctrl+V 한 번이면 모두 들어가요 (1분 안에)`
-        : n ? `이미지 ${n}장을 복사했어요` : "복사했어요");
+      toast(r.combo ? `글과 파일 ${r.files}개(이미지 포함)를 복사했어요. 붙여넣을 곳에서 Ctrl+V 한 번이면 모두 들어가요 (1분 안에)`
+        : r.files ? `파일 ${r.files}개를 복사했어요` : "복사했어요");
     } else {
       await copyText(text);
       flash(btn);
@@ -583,9 +584,10 @@ async function normalize(f){
   cv.getContext("2d").drawImage(bmp, 0, 0, cv.width, cv.height);
   return new Promise(r => cv.toBlob(r, "image/jpeg", .9));
 }
+const IMG_RE = /\.(heic|heif|png|jpe?g|gif|webp|bmp)$/i;
 async function addImages(cardId, files){
-  files = [...files].filter(f => f.type.startsWith("image/") || /\.(heic|heif|png|jpe?g|gif|webp|bmp)$/i.test(f.name));
-  if(!files.length) return toast("이미지 파일만 넣을 수 있어요. 파일 경로는 칸의 [경로]를 눌러 붙여넣어 주세요");
+  files = [...files].filter(f => f.type.startsWith("image/") || IMG_RE.test(f.name));
+  if(!files.length) return toast("이미지 파일만 넣을 수 있어요");
   if(!cardId || !findCard(cardId)[2]) cardId = addCard({images: [], showImages: true});
   toast(`이미지 ${files.length}장 올리는 중`);
   let done = 0;
@@ -599,6 +601,7 @@ async function addImages(cardId, files){
     }catch(e){ toast("이미지를 올리지 못했어요: " + e.message); }
   }
   if(done) toast(`이미지 ${done}장을 넣었어요`);
+  return done;
 }
 function removeImage(cardId, im){
   const [, , c] = findCard(cardId); if(!c) return;
@@ -613,19 +616,56 @@ $("#filePick").addEventListener("change", e => { addImages(pickTarget, e.target.
 function view(src){ $("#viewer img").src = src; $("#viewer").classList.add("on"); }
 $("#viewer").onclick = () => $("#viewer").classList.remove("on");
 
-document.addEventListener("paste", e => {
-  const files = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith("image/"));
-  if(!files.length) return;
-  e.preventDefault();
-  const inCard = document.activeElement?.closest?.(".card")?.dataset.id;
-  addImages(inCard || selCard, files);
+// ---------- 파일·폴더 경로 ----------
+function addPaths(cardId, list){
+  if(!cardId || !findCard(cardId)[2]) cardId = addCard();
+  const [, , c] = findCard(cardId);
+  edit(cardId, {paths: [...new Set([...(c.paths || []).filter(Boolean), ...list])], showPaths: true}, 0);
+  renderCards();
+  toast(`경로 ${list.length}개를 넣었어요. [복사]하면 파일도 같이 복사돼요`);
+  return cardId;
+}
+// 끌어다 놓은 것: 이미지는 이미지로, 다른 파일과 폴더는 경로로 넣는다
+async function dropInto(cardId, dt){
+  // 놓는 순간에만 읽을 수 있어서 await 앞에서 다 꺼내 둔다
+  const ents = [...dt.items].filter(i => i.kind === "file").map(i => {
+    const en = i.webkitGetAsEntry?.(), f = i.getAsFile();
+    return {f, name: en?.name || f?.name || "", dir: !!en?.isDirectory};
+  });
+  const isImg = x => !x.dir && x.f && (x.f.type.startsWith("image/") || IMG_RE.test(x.name));
+  const imgs = ents.filter(isImg).map(x => x.f), rest = ents.filter(x => !isImg(x));
+  if(rest.length && !IS_PC) toast("폰에서는 이미지만 넣을 수 있어요");
+  else if(rest.length){
+    try{
+      const r = await local.req("/api/locate", {items: rest.map(x => ({name: x.name, size: x.f?.size, mtime: x.f?.lastModified, dir: x.dir}))});
+      const found = r.paths.filter(Boolean), miss = rest.length - found.length;
+      if(found.length) cardId = addPaths(cardId, found);
+      if(miss) toast(`${miss}개는 경로를 찾지 못했어요. 탐색기에서 복사(Ctrl+C)한 뒤 칸을 누르고 Ctrl+V 해 주세요`);
+    }catch(e){ toast("경로를 찾지 못했어요: " + e.message); }
+  }
+  if(imgs.length) addImages(cardId, imgs);
+}
+document.addEventListener("paste", async e => {
+  const cd = e.clipboardData; if(!cd) return;
+  const types = [...cd.types], hasText = types.includes("text/plain");
+  const imgs = [...cd.files].filter(f => f.type.startsWith("image/"));
+  const askPc = IS_PC && (types.includes("Files") || !hasText);  // 탐색기에서 복사한 파일·폴더
+  if(!imgs.length && !askPc) return;
+  if(!hasText) e.preventDefault();
+  let id = document.activeElement?.closest?.(".card")?.dataset.id || selCard;
+  if(askPc){
+    const ps = (await local.req("/api/clippaths", {}).catch(() => ({paths: []}))).paths || [];
+    const other = ps.filter(p => !IMG_RE.test(p));
+    if(other.length) id = addPaths(id, other);
+  }
+  if(imgs.length) addImages(id, imgs);
 });
 const hasFiles = ev => [...(ev.dataTransfer?.types || [])].includes("Files");
 let dropDepth = 0;
 document.addEventListener("dragenter", e => { if(hasFiles(e)){ dropDepth++; $("#drop").classList.add("on"); } });
 document.addEventListener("dragleave", e => { if(hasFiles(e) && --dropDepth <= 0){ dropDepth = 0; $("#drop").classList.remove("on"); } });
 document.addEventListener("dragover", e => { if(hasFiles(e)) e.preventDefault(); });
-document.addEventListener("drop", e => { if(!hasFiles(e)) return; e.preventDefault(); dropDepth = 0; $("#drop").classList.remove("on"); addImages(null, e.dataTransfer.files); });
+document.addEventListener("drop", e => { if(!hasFiles(e)) return; e.preventDefault(); dropDepth = 0; $("#drop").classList.remove("on"); dropInto(null, e.dataTransfer); });
 
 // ---------- 탭 ----------
 function selectTab(id){
@@ -949,6 +989,36 @@ if(!IS_PC){
   if(h.get("t") && h.get("r")){ cloud.repo = h.get("r"); cloud.token = h.get("t"); keep("pb_repo", cloud.repo); keep("pb_token", cloud.token); }
   if(location.hash) history.replaceState(null, "", location.pathname);
   for(const e of document.querySelectorAll(".pc-only")) e.hidden = true;
+}
+// 폰: 공유 메뉴에 'PromptBoard' 가 뜨게 한다 (홈 화면에 앱으로 설치했을 때)
+if(!IS_PC){
+  document.head.append(el("link", {rel: "manifest", href: "manifest.webmanifest"}));
+  navigator.serviceWorker?.register("sw.js").catch(() => {});
+}
+// 공유 메뉴로 받은 글·사진(sw.js 가 잠깐 보관)을 새 칸으로 넣는다. 사진을 다 올린 뒤에야 보관한 것을 지운다
+async function takeShared(){
+  if(location.search) history.replaceState(null, "", location.pathname);
+  if(!window.caches) return;
+  const c = await caches.open("pb-share");
+  for(const req of await c.keys()){
+    if(!req.url.includes("/share-item/")) continue;
+    try{
+      const it = await (await c.match(req)).json();
+      const parts = [it.title, it.text];
+      if(it.url && !(it.text || "").includes(it.url)) parts.push(it.url);
+      const text = [...new Set(parts.filter(Boolean))].join("\n");
+      const images = [];
+      for(const k of it.files){
+        const r = await c.match(k); if(!r) continue;
+        const b = await r.blob();
+        images.push(await store.upload(await normalize(new File([b], decodeURIComponent(r.headers.get("X-Name") || "") || "image", {type: b.type}))));
+      }
+      addCard({text, images, showImages: images.length > 0});
+      for(const k of it.files) await c.delete(k);
+      await c.delete(req);
+      toast(images.length ? `공유받은 글과 사진 ${images.length}장을 새 칸에 넣었어요` : "공유받은 내용을 새 칸에 넣었어요");
+    }catch(e){ toast("공유받은 것을 넣지 못했어요. 인터넷이 되면 앱을 다시 열어 주세요 (" + e.message + ")"); }
+  }
 }
 if(!IS_PC && !cloud.token) $("#setup").classList.add("on");
 else poll();
